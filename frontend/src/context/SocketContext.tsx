@@ -26,36 +26,63 @@ export const SocketProvider: React.FC<Props> = ({ children }) => {
     const [user, setUser] = useState<Peer>(); // new peer user
     const [stream, setStream] = useState<MediaStream>();
 
-    const fetchParticipants = ({ roomId, participants }: { roomId: string, participants: string[] }) => {
-        console.log("Fetched room participants");
-        console.log(roomId, participants);
-    }
-
-    const fetchUserFeed=async()=>{
-        const stream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
-        setStream(stream);
-    }
-
     useEffect(() => {
         const userId = UUIDv4();
-        const newPeer = new Peer(userId);
+        const newPeer = new Peer(userId, {
+            host: "localhost",
+            port: 9000,
+            path: "/myapp"
+        });
 
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setUser(newPeer);
 
-        fetchUserFeed();
+        let isMounted = true;
+        let mediaStream: MediaStream | undefined;
 
-        const enterRoom = ({ roomId }: { roomId: string }) => {
-            navigate(`/room/${roomId}`)
+        const fetchUserFeed = async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                if (isMounted) {
+                    mediaStream = stream;
+                    setStream(stream);
+                } else {
+                    stream.getTracks().forEach((track) => track.stop());
+                }
+            } catch (error) {
+                console.error("Could not access camera and microphone:", error);
+            }
         }
 
-        // we will transfer the user to the room page when we collect an event of room-created from server
-        socket.on("room-created", enterRoom)
+        void fetchUserFeed();
+
+        return () => {
+            isMounted = false;
+            newPeer.destroy();
+            mediaStream?.getTracks().forEach((track) => track.stop());
+        };
+    }, []);
+
+    useEffect(() => {
+        const enterRoom = ({ roomId }: { roomId: string }) => {
+            navigate(`/room/${roomId}`);
+        };
+        const fetchParticipants = ({ roomId, participants }: { roomId: string, participants: string[] }) => {
+            console.log("Fetched room participants");
+            console.log(roomId, participants);
+        };
+
+        socket.on("room-created", enterRoom);
         socket.on("get-users", fetchParticipants);
+
+        return () => {
+            socket.off("room-created", enterRoom);
+            socket.off("get-users", fetchParticipants);
+        };
     }, [navigate]);
 
     return (
-        <SocketContext.Provider value={{ socket, user, stream}}>
+        <SocketContext.Provider value={{ socket, user, stream }}>
             {children}
         </SocketContext.Provider>
     )
